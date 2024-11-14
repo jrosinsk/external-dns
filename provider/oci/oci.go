@@ -200,9 +200,25 @@ func (p *OCIProvider) addPaginatedZones(ctx context.Context, zones map[string]dn
 
 func (p *OCIProvider) newFilteredRecordOperations(endpoints []*endpoint.Endpoint, opType dns.RecordOperationOperationEnum) []dns.RecordOperation {
 	ops := []dns.RecordOperation{}
-	for _, endpoint := range endpoints {
-		if p.domainFilter.Match(endpoint.DNSName) {
-			ops = append(ops, newRecordOperation(endpoint, opType))
+	for _, ep := range endpoints {
+		if p.domainFilter.Match(ep.DNSName) {
+			switch ep.RecordType {
+			case endpoint.RecordTypeA, endpoint.RecordTypeAAAA:
+				for _, t := range ep.Targets {
+					singleTargetEp := &endpoint.Endpoint{
+						DNSName:          ep.DNSName,
+						Targets:          []string{t},
+						RecordType:       ep.RecordType,
+						SetIdentifier:    ep.SetIdentifier,
+						RecordTTL:        ep.RecordTTL,
+						Labels:           ep.Labels,
+						ProviderSpecific: ep.ProviderSpecific,
+					}
+					ops = append(ops, newRecordOperation(singleTargetEp, opType))
+				}
+			default:
+				ops = append(ops, newRecordOperation(ep, opType))
+			}
 		}
 	}
 	return ops
