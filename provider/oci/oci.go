@@ -19,6 +19,7 @@ package oci
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -200,9 +201,24 @@ func (p *OCIProvider) addPaginatedZones(ctx context.Context, zones map[string]dn
 
 func (p *OCIProvider) newFilteredRecordOperations(endpoints []*endpoint.Endpoint, opType dns.RecordOperationOperationEnum) []dns.RecordOperation {
 	ops := []dns.RecordOperation{}
-	for _, endpoint := range endpoints {
-		if p.domainFilter.Match(endpoint.DNSName) {
-			ops = append(ops, newRecordOperation(endpoint, opType))
+	for _, ep := range endpoints {
+		if p.domainFilter.Match(ep.DNSName) {
+			if len(ep.Targets) > 0 {
+				for _, t := range ep.Targets {
+					singleTargetEp := &endpoint.Endpoint{
+						DNSName:          ep.DNSName,
+						Targets:          []string{t},
+						RecordType:       ep.RecordType,
+						SetIdentifier:    ep.SetIdentifier,
+						RecordTTL:        ep.RecordTTL,
+						Labels:           ep.Labels,
+						ProviderSpecific: ep.ProviderSpecific,
+					}
+					ops = append(ops, newRecordOperation(singleTargetEp, opType))
+				}
+			} else {
+				ops = append(ops, newRecordOperation(ep, opType))
+			}
 		}
 	}
 	return ops
@@ -348,4 +364,37 @@ func operationsByZone(zones map[string]dns.ZoneSummary, ops []dns.RecordOperatio
 	}
 
 	return changes
+}
+
+// returns true if targets contain both public and private IPs
+func targetsContainPrivateAndPublicIp(targets []string) bool {
+	publicIpFound := false
+	privateIpFound := false
+	for _, t := range targets {
+		ipTarget := net.ParseIP(t)
+		if ipTarget.IsPrivate() {
+			privateIpFound = true
+		} else {
+			publicIpFound = true
+		}
+	}
+	return publicIpFound && privateIpFound
+}
+
+// removes any private IP
+func removePrivateIpFromTargets(targets []string) []string {
+	var newTargets []string
+	if !(len(targets) > 1) {
+		log.Warnf("Targets array should contain more than a single IP")
+		return targets
+	}
+	for _, t := range targets {
+		ipTarget := net.ParseIP(t)
+		if ipTarget.IsPrivate() {
+			log.Debugf("removing private ip: %s", t)
+		} else {
+			newTargets = append(newTargets, t)
+		}
+	}
+	return newTargets
 }
